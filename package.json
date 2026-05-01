@@ -1,0 +1,44 @@
+{
+  "name": "grace-match-backend",
+  "version": "1.0.0",
+  "description": "GraceMatch – Christian Matrimony Platform API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "migrate": "node scripts/migrate.js",
+    "tunnel": "ngrok http 5050",
+    "reset": "node scripts/wipe_all_data.js"
+  },
+  "keywords": [
+    "matrimony",
+    "christian",
+    "gracematch"
+  ],
+  "author": "kcs",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1038.0",
+    "axios": "^1.15.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "express-validator": "^7.3.2",
+    "firebase-admin": "^13.8.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "multer": "^2.1.1",
+    "ngrok": "^5.0.0-beta.2",
+    "pg": "^8.20.0",
+    "razorpay": "^2.9.6",
+    "socket.io": "^4.8.3",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
