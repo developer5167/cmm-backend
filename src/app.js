@@ -20,6 +20,9 @@ const adminRoutes = require('./routes/admin.routes');
 const premiumRoutes = require('./routes/premium.routes');
 const trustRoutes = require('./routes/trust.routes');
 const growthRoutes = require('./routes/growth.routes');
+const activityRoutes = require('./routes/activity.routes');
+const shareRoutes    = require('./routes/share.routes');
+const { assetLinks, appleAppSiteAssociation } = require('./controllers/share.controller');
 
 const app = express();
 
@@ -88,6 +91,10 @@ if (process.env.NODE_ENV === 'development') {
   app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 }
 
+// ─── Well-known (App Links + Universal Links) ─────────────────
+app.get('/.well-known/assetlinks.json',          assetLinks);
+app.get('/.well-known/apple-app-site-association', appleAppSiteAssociation);
+
 // ─── Health Check ─────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({
@@ -112,6 +119,8 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/premium', premiumRoutes);
 app.use('/api/v1/trust', trustRoutes);
 app.use('/api/v1/growth', growthRoutes);
+app.use('/api/v1/activity', activityRoutes);
+app.use('/api/v1/share',   shareRoutes);
 
 // ─── 404 & Error Handlers ────────────────────────────────────
 app.use(notFound);

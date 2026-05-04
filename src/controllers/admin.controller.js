@@ -1,6 +1,7 @@
 const { query } = require('../db');
 const bcrypt = require('bcryptjs');
 const { sendPushToUser } = require('../services/fcm.service');
+const { deleteFile } = require('../services/storage.service');
 
 // ─── AUDIT LOG HELPER ─────────────────────────────────────────
 const logAudit = async (adminId, action, targetType, targetId, details = {}, req = null) => {
@@ -221,7 +222,7 @@ const getPendingApplications = async (req, res, next) => {
   try {
     const result = await query(
       `SELECT p.*, u.phone_number, a.name as locked_by_name,
-        (SELECT json_agg(json_build_object('url', ph.photo_url, 'is_approved', ph.is_approved)) 
+        (SELECT json_agg(json_build_object('id', ph.id, 'url', ph.photo_url, 'is_approved', ph.is_approved, 'review_status', ph.review_status, 'is_primary', ph.is_primary) ORDER BY ph.order_index) 
          FROM user_photos ph WHERE ph.user_id = p.user_id) as photos,
         (SELECT json_agg(h.name) 
          FROM user_hobbies uh 
@@ -312,6 +313,136 @@ const reviewApplication = async (req, res, next) => {
   }
 };
  
+// ─── PHOTO REVIEW ─────────────────────────────────────────────
+
+const getPendingPhotos = async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT
+         ph.id, ph.photo_url, ph.is_primary, ph.created_at,
+         p.user_id, p.first_name, p.last_name,
+         u.phone_number
+       FROM user_photos ph
+       JOIN user_profiles p ON p.user_id = ph.user_id
+       JOIN users u ON u.id = ph.user_id
+       WHERE ph.review_status = 'pending'
+       ORDER BY ph.created_at ASC`
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const reviewPhoto = async (req, res, next) => {
+  try {
+    const { photoId } = req.params;
+    const { status, rejection_reason } = req.body;
+    const adminId = req.user.id;
+
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    const photoRes = await query('SELECT * FROM user_photos WHERE id = $1', [photoId]);
+    if (photoRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Photo not found' });
+    }
+    const photo = photoRes.rows[0];
+
+    const isApproved = status === 'approved';
+    await query(
+      `UPDATE user_photos
+       SET is_approved = $1, review_status = $2, rejection_reason = $3,
+           reviewed_by = $4, reviewed_at = NOW()
+       WHERE id = $5`,
+      [isApproved, status, rejection_reason || null, adminId, photoId]
+    );
+
+    // Delete the file from storage when rejected so it doesn't consume space
+    if (!isApproved && photo.s3_key) {
+      try {
+        await deleteFile(photo.s3_key);
+      } catch (delErr) {
+        console.warn(`⚠️ Could not delete file for rejected photo ${photoId}:`, delErr.message);
+      }
+    }
+
+    const notification = isApproved
+      ? {
+          title: 'Photo Approved',
+          body: 'Your photo has been approved and is now visible on your profile.',
+        }
+      : {
+          title: 'Photo Rejected',
+          body: rejection_reason
+            ? `Your photo was rejected: ${rejection_reason}`
+            : 'Your photo did not meet our guidelines. Please upload a different photo.',
+        };
+
+    await sendPushToUser(photo.user_id, notification, {
+      type: 'PHOTO_REVIEW_RESULT',
+      status,
+      photo_id: String(photoId),
+      reason: rejection_reason || '',
+    });
+
+    await logAudit(
+      adminId,
+      isApproved ? 'APPROVE_PHOTO' : 'REJECT_PHOTO',
+      'photo',
+      photoId,
+      { reason: rejection_reason },
+      req
+    );
+
+    res.json({ success: true, message: `Photo ${status} successfully` });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── PER-USER ACTIVITY STATS (admin use only) ────────────────
+
+const getUserViewStats = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const result = await query(
+      `SELECT COUNT(*) AS total FROM profile_views WHERE viewed_id = $1`,
+      [userId]
+    );
+    res.json({ success: true, data: { total: parseInt(result.rows[0].total) } });
+  } catch (err) { next(err); }
+};
+
+const getUserShortlistStats = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const result = await query(
+      `SELECT COUNT(*) AS total FROM shortlists WHERE shortlisted_user_id = $1`,
+      [userId]
+    );
+    res.json({ success: true, data: { total: parseInt(result.rows[0].total) } });
+  } catch (err) { next(err); }
+};
+
+const getUserNotifStats = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const [totalRes, unreadRes] = await Promise.all([
+      query(`SELECT COUNT(*) AS total FROM notifications WHERE user_id = $1`, [userId]),
+      query(`SELECT COUNT(*) AS unread FROM notifications WHERE user_id = $1 AND is_read = false`, [userId]),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        total: parseInt(totalRes.rows[0].total),
+        unread: parseInt(unreadRes.rows[0].unread),
+      },
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPendingRevisions,
   reviewRevision,
@@ -324,4 +455,9 @@ module.exports = {
   reviewApplication,
   lockApplication,
   unlockApplication,
+  getPendingPhotos,
+  reviewPhoto,
+  getUserViewStats,
+  getUserShortlistStats,
+  getUserNotifStats,
 };

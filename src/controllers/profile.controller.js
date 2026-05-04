@@ -21,7 +21,7 @@ const getMyProfile = async (req, res, next) => {
       query('SELECT * FROM user_profiles WHERE user_id = $1', [userId]),
       query('SELECT * FROM user_family WHERE user_id = $1', [userId]),
       query('SELECT * FROM user_partner_preferences WHERE user_id = $1', [userId]),
-      query('SELECT id, photo_url, is_primary, is_approved, order_index FROM user_photos WHERE user_id = $1 ORDER BY order_index', [userId]),
+      query('SELECT id, photo_url, is_primary, is_approved, review_status, rejection_reason, order_index FROM user_photos WHERE user_id = $1 ORDER BY order_index', [userId]),
       query('SELECT h.id, h.name FROM user_hobbies uh JOIN hobbies h ON h.id = uh.hobby_id WHERE uh.user_id = $1', [userId]),
     ]);
 
@@ -230,14 +230,26 @@ const updatePreferences = async (req, res, next) => {
 };
 
 // ─── UPDATE Settings / Privacy ────────────────────────────────
+const coerceBool = (v) => {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === 'boolean') return v;
+  if (v === 'true' || v === 1 || v === '1') return true;
+  if (v === 'false' || v === 0 || v === '0') return false;
+  return Boolean(v);
+};
+
 const updateSettings = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { profile_visibility, who_can_chat, is_contact_sharing_allowed, is_images_locked } = req.body;
 
     const fields = Object.fromEntries(
-      Object.entries({ profile_visibility, who_can_chat, is_contact_sharing_allowed, is_images_locked })
-        .filter(([, v]) => v !== undefined)
+      Object.entries({
+        profile_visibility,
+        who_can_chat,
+        is_contact_sharing_allowed: coerceBool(is_contact_sharing_allowed),
+        is_images_locked: coerceBool(is_images_locked),
+      }).filter(([, v]) => v !== undefined && v !== null)
     );
 
     if (Object.keys(fields).length === 0) {
@@ -305,9 +317,15 @@ const getPublicProfile = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Profile is hidden' });
     }
 
-    // Check interaction status
+    // Check interaction status — include id, sender_id, and conversation_id
     const interactionCheck = await query(
-      `SELECT status FROM interests WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`,
+      `SELECT i.id, i.status, i.sender_id,
+              c.id AS conversation_id
+       FROM interests i
+       LEFT JOIN conversations c ON c.interest_id = i.id
+       WHERE (i.sender_id = $1 AND i.receiver_id = $2)
+          OR (i.sender_id = $2 AND i.receiver_id = $1)
+       LIMIT 1`,
       [viewerId, viewedId]
     );
     const hasInteraction = interactionCheck.rows.length > 0;
@@ -366,6 +384,7 @@ const getPublicProfile = async (req, res, next) => {
         interaction_status: interactionCheck.rows[0]?.status || 'none',
         interaction_sender_id: interactionCheck.rows[0]?.sender_id || null,
         interest_id: interactionCheck.rows[0]?.id || null,
+        conversation_id: interactionCheck.rows[0]?.conversation_id || null,
       },
     });
   } catch (err) {

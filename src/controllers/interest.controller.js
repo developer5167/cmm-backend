@@ -116,39 +116,48 @@ const acceptInterest = async (req, res, next) => {
         [id]
       );
 
-      // Create Conversation
-      await client.query(
-        `INSERT INTO conversations (interest_id, user1_id, user2_id) VALUES ($1, $2, $3)`,
-        [id, interest.sender_id, receiverId] // User1 is sender, User2 is receiver
+      // Create Conversation — capture the new conversation ID
+      const convRes = await client.query(
+        `INSERT INTO conversations (interest_id, user1_id, user2_id) VALUES ($1, $2, $3) RETURNING id`,
+        [id, interest.sender_id, receiverId]
       );
+      const conversationId = convRes.rows[0].id;
 
       await client.query('COMMIT');
+
+      // Push + in-app notification to SENDER with conversation_id so they can navigate directly
+      const receiverProfile = await query(
+        `SELECT first_name FROM user_profiles WHERE user_id = $1`, [receiverId]
+      );
+      const fname = receiverProfile.rows[0]?.first_name || 'Someone';
+
+      await sendPushToUser(interest.sender_id, {
+        title: 'Interest Accepted! 🎉',
+        body: `${fname} accepted your interest. You can now start chatting.`
+      }, {
+        type: 'interest_accepted',
+        interest_id: id,
+        conversation_id: conversationId,
+        receiver_id: receiverId
+      });
+
+      await query(
+        `INSERT INTO notifications (user_id, type, title, body, data) VALUES ($1, $2, $3, $4, $5)`,
+        [
+          interest.sender_id,
+          'interest_accepted',
+          'Interest Accepted! 🎉',
+          `${fname} accepted your interest.`,
+          JSON.stringify({ interest_id: id, conversation_id: conversationId, receiver_id: receiverId }),
+        ]
+      );
+
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
     } finally {
       client.release();
     }
-
-    // Push notification to sender
-    const receiverProfile = await query(
-      `SELECT first_name FROM user_profiles WHERE user_id = $1`, [receiverId]
-    );
-    const fname = receiverProfile.rows[0]?.first_name || 'Someone';
-
-    await sendPushToUser(interest.sender_id, {
-      title: 'Interest Accepted! 🎉',
-      body: `${fname} accepted your interest. You can now start chatting.`
-    }, {
-      type: 'interest_accepted',
-      interest_id: id,
-      receiver_id: receiverId
-    });
-
-    await query(
-      `INSERT INTO notifications (user_id, type, title, body, data) VALUES ($1, $2, $3, $4, $5)`,
-      [interest.sender_id, 'interest_accepted', 'Interest Accepted! 🎉', `${fname} accepted your interest.`, JSON.stringify({ interest_id: id, receiver_id: receiverId })]
-    );
 
     res.json({ success: true, message: 'Interest accepted. Chat unlocked.' });
   } catch (err) {
