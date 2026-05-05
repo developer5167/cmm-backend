@@ -119,11 +119,12 @@ const sendPushToUser = async (userId, notification, data = {}) => {
  * Save or update FCM token for a user
  */
 const saveToken = async (userId, token, deviceType) => {
+  if (!token || typeof token !== 'string' || token.trim().length === 0) return;
   await query(
     `INSERT INTO fcm_tokens (user_id, token, device_type)
      VALUES ($1, $2, $3)
-     ON CONFLICT (user_id, device_type)
-     DO UPDATE SET token = $2, updated_at = NOW()`,
+     ON CONFLICT (token)
+     DO UPDATE SET user_id = EXCLUDED.user_id, device_type = EXCLUDED.device_type, updated_at = NOW()`,
     [userId, token, deviceType]
   );
 };

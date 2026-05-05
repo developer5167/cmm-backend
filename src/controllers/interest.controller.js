@@ -159,7 +159,7 @@ const acceptInterest = async (req, res, next) => {
       client.release();
     }
 
-    res.json({ success: true, message: 'Interest accepted. Chat unlocked.' });
+    res.json({ success: true, message: 'Interest accepted. Chat unlocked.', data: { conversation_id: conversationId } });
   } catch (err) {
     next(err);
   }

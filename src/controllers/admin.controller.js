@@ -443,6 +443,79 @@ const getUserNotifStats = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ─── PENDING ID Verifications ─────────────────────────────────
+const getPendingVerifications = async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT p.user_id, p.first_name, p.last_name, p.id_proof_url,
+              p.is_id_verified, p.updated_at,
+              u.phone_number,
+              (SELECT photo_url FROM user_photos
+               WHERE user_id = p.user_id AND is_approved = true AND is_primary = true
+               LIMIT 1) as primary_photo
+       FROM user_profiles p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.id_proof_url IS NOT NULL AND p.is_id_verified = false
+       ORDER BY p.updated_at ASC`
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) { next(err); }
+};
+
+// ─── APPROVE / REJECT ID Verification ────────────────────────
+const reviewVerification = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { action, reason } = req.body; // action: 'approve' | 'reject'
+    const adminId = req.user.id;
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Action must be approve or reject' });
+    }
+
+    if (action === 'approve') {
+      // Mark ID as verified and recalculate trust badge
+      await query(
+        `UPDATE user_profiles SET is_id_verified = true, updated_at = NOW() WHERE user_id = $1`,
+        [userId]
+      );
+      // Recalculate trust badge (church + denomination + verified = badge)
+      const prof = await query(
+        `SELECT church_name, denomination FROM user_profiles WHERE user_id = $1`,
+        [userId]
+      );
+      const p = prof.rows[0] ?? {};
+      const badge = !!(p.church_name && p.denomination);
+      await query(
+        `UPDATE user_profiles SET trust_badge = $1 WHERE user_id = $2`,
+        [badge, userId]
+      );
+    } else {
+      // Clear the uploaded proof so they can re-upload
+      await query(
+        `UPDATE user_profiles SET id_proof_url = NULL, id_proof_s3_key = NULL, is_id_verified = false WHERE user_id = $1`,
+        [userId]
+      );
+    }
+
+    // Notify the user
+    const { sendPushToUser } = require('../services/fcm.service');
+    if (action === 'approve') {
+      await sendPushToUser(userId, {
+        title: 'Identity Verified ✓',
+        body: 'Your ID has been verified. Your profile now has a trust badge!',
+      }, { type: 'identity_verified' });
+    } else {
+      await sendPushToUser(userId, {
+        title: 'ID Verification Failed',
+        body: reason || 'Your ID could not be verified. Please upload a clearer document.',
+      }, { type: 'identity_rejected' });
+    }
+
+    res.json({ success: true, message: `Verification ${action}d successfully` });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPendingRevisions,
   reviewRevision,
@@ -460,4 +533,6 @@ module.exports = {
   getUserViewStats,
   getUserShortlistStats,
   getUserNotifStats,
+  getPendingVerifications,
+  reviewVerification,
 };

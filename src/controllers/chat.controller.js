@@ -94,7 +94,7 @@ const sendMessage = async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
       [conversationId, userId, content, message_type, photo_url, photo_s3_key]
     );
-    const messageData = msgRes.rows[0];
+    let messageData = msgRes.rows[0];
 
     // Update conversation last_message_at
     await query(
@@ -110,6 +110,13 @@ const sendMessage = async (req, res, next) => {
       receiverOnline = srv.emitToUser(access.otherUserId, 'new_message', messageData);
       // If receiver's socket is active, send a delivered receipt back to sender
       if (receiverOnline) {
+        const deliveredRes = await query(
+          `UPDATE messages SET delivered_at = NOW() WHERE id = $1 RETURNING *`,
+          [messageData.id]
+        );
+        if (deliveredRes.rows.length > 0) {
+          messageData = deliveredRes.rows[0];
+        }
         srv.emitToUser(userId, 'message_delivered', {
           message_id: messageData.id,
           conversation_id: conversationId,
@@ -181,7 +188,7 @@ const getMessages = async (req, res, next) => {
     }
 
     const messages = await query(
-      `SELECT id, sender_id, content, message_type, photo_url, is_read, read_at, created_at 
+      `SELECT id, sender_id, content, message_type, photo_url, delivered_at, is_read, read_at, created_at 
        FROM messages 
        WHERE conversation_id = $1 AND is_deleted = false
        ORDER BY created_at DESC

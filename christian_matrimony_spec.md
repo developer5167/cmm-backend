@@ -1,7 +1,9 @@
 # Christian Matrimony Platform – Full System Specification
 
 ## 🎯 Vision
+
 A **premium Christian matrimony platform** with:
+
 - Modern swipe-based UX (like dating apps)
 - Deep matrimony data
 - Strong privacy + trust system
@@ -12,6 +14,7 @@ A **premium Christian matrimony platform** with:
 # 🏗️ TECH STACK
 
 ## Backend
+
 - Node.js + Express
 - JWT Authentication
 - PostgreSQL (No ORM, raw SQL queries)
@@ -24,21 +27,25 @@ A **premium Christian matrimony platform** with:
   - middleware/
 
 ## Web
+
 - React.js
 - Clean modular architecture
 
 ## Mobile
+
 - Flutter
 - BLoC (with Equatable)
 - Multiple states (NOT single state)
 - no copyWith usage
 
 ## Notifications
+
 - Firebase Cloud Messaging (FCM)
 
 ---
 
 # 🔐 AUTH FLOW
+
 - Phone number login (OTP)
 - JWT token system
 
@@ -47,6 +54,7 @@ A **premium Christian matrimony platform** with:
 # 🧩 ONBOARDING FLOW
 
 ## UX Rules
+
 - One question per screen
 - Smooth transitions
 - Haptic feedback on every action
@@ -58,6 +66,7 @@ A **premium Christian matrimony platform** with:
 ## Steps
 
 ### Basic
+
 - Gender
 - Looking for
 - Name
@@ -65,6 +74,7 @@ A **premium Christian matrimony platform** with:
 - Location
 
 ### Matrimony Core
+
 - Marriage intent
 - Denomination(protestant,catholic,orthodox,CSI,Pentecostal,born again,other)
 - Church name(name of the church attending )
@@ -74,17 +84,20 @@ A **premium Christian matrimony platform** with:
 - 
 
 ### Personal
+
 - Education
 - Profession
 - Income
 
 ### Lifestyle
+
 - Smoking(yes,no, occasionally)
 - Drinking(yes,no, occasionally)
 - Diet(veg,non-veg, occasionally)
 - Gym(yes,no, occasionally)
 
 ### Family (Single Screen)
+
 - Father occupation
 - Mother occupation
 - Siblings (brothers/sisters)
@@ -93,6 +106,7 @@ A **premium Christian matrimony platform** with:
 - Family class
 
 ### Partner Preferences
+
 - Age range
 - Location
 - Denomination (with “Doesn’t matter”)
@@ -101,17 +115,20 @@ A **premium Christian matrimony platform** with:
 - Profession
 - Salary range
 
-
 ### Hobbies
+
 - Multi-select chips
 
 ### Photos
+
 - At least ONE mandatory
 
 ### Verification
+
 - Government ID (optional)
 
 ### Profile Managed By
+
 - Self / Parents / Others
 
 ---
@@ -121,6 +138,7 @@ A **premium Christian matrimony platform** with:
 ## Layers
 
 ### 1. Hard Filters
+
 - Gender
 - Age
 - Location
@@ -131,6 +149,7 @@ A **premium Christian matrimony platform** with:
 - Salary range
 
 ### 2. Compatibility Score
+
 - Faith
 - Lifestyle
 - Family
@@ -138,6 +157,7 @@ A **premium Christian matrimony platform** with:
 - Career
 
 ### 3. Behavioral Signals
+
 - Likes
 - Skips
 - Time spent
@@ -155,6 +175,7 @@ A **premium Christian matrimony platform** with:
 # 💬 INTEREST SYSTEM
 
 States:
+
 - Sent
 - Received
 - Accepted
@@ -162,6 +183,7 @@ States:
 - Connected
 
 Flow:
+
 - Send interest
 - Accept/Reject
 - Chat unlock
@@ -171,10 +193,12 @@ Flow:
 # 🔐 PRIVACY & SECURITY
 
 ## Contact Sharing
+
 - Premium required to request
 - Owner approves
 
 ## Controls
+
 - Who can see profile
 - Who can chat
 - Image locking
@@ -203,17 +227,20 @@ Flow:
 # 🎨 UI/UX GUIDELINES
 
 ## Design Style
+
 - Clean, modern
 - Soft colors (white, gold, blue)
 - Rounded cards
 - Smooth animations
 
 ## Interactions
+
 - Swipe gestures
 - Micro animations
 - Haptic feedback
 
 ## Screens
+
 - Card-based discovery
 - Structured onboarding
 - Clean chat UI
@@ -239,6 +266,7 @@ Control
 # 📌 BOTTOM NAVIGATION FLOW
 
 BottomNavigationBar:
+
 1. Discover → Swipe cards /  Daily matches / Compatibility / Filters button (top left)
 2. Interests → tabs Received / Sent / Connected
 3. Chat → Conversations list / Last message preview / Online status

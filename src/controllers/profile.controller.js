@@ -1,6 +1,7 @@
 const { query } = require('../db');
 const { recalculateCompletionScore, generateBio } = require('../services/onboarding.service');
 const { parsePgArray } = require('../utils/helpers');
+const { sendPushToUser } = require('../services/fcm.service');
 
 const SENSITIVE_FIELDS = [
   'first_name', 'last_name', 'church_name', 'caste', 
@@ -13,7 +14,7 @@ const getMyProfile = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    const [userRes, profileRes, familyRes, prefsRes, photosRes, hobbiesRes] = await Promise.all([
+    const [userRes, profileRes, familyRes, prefsRes, photosRes, hobbiesRes, subRes] = await Promise.all([
       query(`SELECT u.id, u.phone_number, u.is_active, u.is_onboarding_complete, p.review_status 
              FROM users u 
              LEFT JOIN user_profiles p ON u.id = p.user_id 
@@ -23,6 +24,17 @@ const getMyProfile = async (req, res, next) => {
       query('SELECT * FROM user_partner_preferences WHERE user_id = $1', [userId]),
       query('SELECT id, photo_url, is_primary, is_approved, review_status, rejection_reason, order_index FROM user_photos WHERE user_id = $1 ORDER BY order_index', [userId]),
       query('SELECT h.id, h.name FROM user_hobbies uh JOIN hobbies h ON h.id = uh.hobby_id WHERE uh.user_id = $1', [userId]),
+      query(
+        `SELECT sp.name AS plan_name, s.expires_at
+           FROM subscriptions s
+           JOIN subscription_plans sp ON sp.id = s.plan_id
+          WHERE s.user_id = $1
+            AND s.status = 'active'
+            AND s.expires_at > NOW()
+          ORDER BY s.expires_at DESC
+          LIMIT 1`,
+        [userId]
+      ),
     ]);
 
     if (userRes.rows.length === 0) {
@@ -43,6 +55,17 @@ const getMyProfile = async (req, res, next) => {
         partner_preferences: partnerPrefs,
         photos: photosRes.rows,
         hobbies: hobbiesRes.rows,
+        subscription: subRes.rows[0]
+          ? {
+              is_premium: true,
+              plan_name: subRes.rows[0].plan_name,
+              expires_at: subRes.rows[0].expires_at,
+            }
+          : {
+              is_premium: false,
+              plan_name: null,
+              expires_at: null,
+            },
       },
     });
   } catch (err) {
@@ -347,11 +370,95 @@ const getPublicProfile = async (req, res, next) => {
     let photos = photosRes.rows;
     const imagesLocked = profile.is_images_locked && !isAccepted;
 
-    // Log profile view (fire and forget)
-    query(
-      `INSERT INTO profile_views (viewer_id, viewed_id) VALUES ($1, $2)`,
-      [viewerId, viewedId]
-    ).catch(e => console.error('Error logging profile view:', e));
+    // Embed contact_status for accepted matches — eliminates a separate API round-trip.
+    // Returns the same shape as GET /premium/contact-status/:id so the client needs
+    // no format conversion.
+    let contactStatus = null;
+    if (isAccepted) {
+      const [outRes, inRes] = await Promise.all([
+        query(
+          `SELECT id, status, responded_at FROM contact_requests
+           WHERE requester_id = $1 AND target_user_id = $2
+           ORDER BY requested_at DESC LIMIT 1`,
+          [viewerId, viewedId]
+        ),
+        query(
+          `SELECT id, status FROM contact_requests
+           WHERE requester_id = $1 AND target_user_id = $2
+           ORDER BY requested_at DESC LIMIT 1`,
+          [viewedId, viewerId]
+        ),
+      ]);
+      const outRow = outRes.rows[0] ?? null;
+      const inRow  = inRes.rows[0]  ?? null;
+
+      let phone = null;
+      if (outRow?.status === 'approved') {
+        const phoneRes = await query(
+          `SELECT phone_number FROM users WHERE id = $1`, [viewedId]
+        );
+        phone = phoneRes.rows[0]?.phone_number ?? null;
+      }
+
+      contactStatus = {
+        outgoing: outRow ? { id: outRow.id, status: outRow.status, responded_at: outRow.responded_at } : null,
+        incoming: inRow  ? { id: inRow.id,  status: inRow.status  } : null,
+        phone,
+      };
+    }
+
+    // Log profile view (fire and forget). Send push only on first-ever view
+    // from this viewer to this target (prevents spam on repeated opens).
+    (async () => {
+      try {
+        const existsRes = await query(
+          `SELECT 1
+             FROM profile_views
+            WHERE viewer_id = $1 AND viewed_id = $2
+            LIMIT 1`,
+          [viewerId, viewedId]
+        );
+        const isFirstView = existsRes.rows.length === 0;
+
+        await query(
+          `INSERT INTO profile_views (viewer_id, viewed_id) VALUES ($1, $2)`,
+          [viewerId, viewedId]
+        );
+
+        if (!isFirstView) return;
+
+        const viewerProfile = await query(
+          `SELECT first_name FROM user_profiles WHERE user_id = $1`,
+          [viewerId]
+        );
+        const fname = viewerProfile.rows[0]?.first_name || 'Someone';
+
+        await query(
+          `INSERT INTO notifications (user_id, type, title, body, data)
+           VALUES ($1, 'profile_viewed', $2, $3, $4)`,
+          [
+            viewedId,
+            'Someone viewed your profile 👀',
+            `${fname} viewed your profile.`,
+            JSON.stringify({ actor_id: viewerId }),
+          ]
+        );
+
+        await sendPushToUser(
+          viewedId,
+          {
+            title: 'New profile view 👀',
+            body: `${fname} viewed your profile.`,
+          },
+          {
+            type: 'profile_viewed',
+            actor_id: viewerId,
+          }
+        );
+      } catch (e) {
+        console.error('Error logging profile view:', e.message);
+      }
+    })();
 
     res.json({
       success: true,
@@ -385,6 +492,7 @@ const getPublicProfile = async (req, res, next) => {
         interaction_sender_id: interactionCheck.rows[0]?.sender_id || null,
         interest_id: interactionCheck.rows[0]?.id || null,
         conversation_id: interactionCheck.rows[0]?.conversation_id || null,
+        contact_status: contactStatus, // null when not accepted; embedded to avoid extra call
       },
     });
   } catch (err) {

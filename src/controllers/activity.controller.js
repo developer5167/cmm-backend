@@ -1,4 +1,5 @@
 const { query } = require('../db');
+const { sendPushToUser } = require('../services/fcm.service');
 
 // ─── HELPER: check premium feature ───────────────────────────
 const hasPremiumFeature = async (userId, featureKey) => {
@@ -202,6 +203,19 @@ const toggleShortlist = async (req, res, next) => {
       ]
     );
 
+    // Push notification for real-time awareness
+    await sendPushToUser(
+      target_user_id,
+      {
+        title: 'You were shortlisted ⭐',
+        body: `${fname} shortlisted your profile.`,
+      },
+      {
+        type: 'shortlisted',
+        actor_id: userId,
+      }
+    );
+
     res.json({ success: true, message: 'Added to shortlist', data: { is_shortlisted: true } });
   } catch (err) {
     next(err);
@@ -223,4 +237,140 @@ const checkShortlist = async (req, res, next) => {
   }
 };
 
-module.exports = { getSummary, getViews, getShortlists, toggleShortlist, checkShortlist };
+// ─── BOOTSTRAP — single call for entire Activity tab ─────────
+// Uses Promise.allSettled so one failing section never kills the others.
+const getBootstrap = async (req, res, next) => {
+  try {
+    const userId  = req.user.id;
+    const isPremium = await hasPremiumFeature(userId, 'see_who_viewed');
+
+    // Run all sections in parallel, tolerating individual failures
+    const [notifResult, viewsResult, shortlistResult, contactResult] = await Promise.allSettled([
+      // ── Notifications (first 30, most recent) ─────────────
+      query(
+        `SELECT id, type, title, body, data, is_read, created_at
+         FROM notifications
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 30`,
+        [userId]
+      ),
+
+      // ── Views ─────────────────────────────────────────────
+      isPremium
+        ? query(
+            `SELECT DISTINCT ON (pv.viewer_id)
+               pv.viewer_id as user_id,
+               p.first_name, p.location_city, p.denomination, p.date_of_birth, p.trust_badge,
+               pv.viewed_at,
+               (SELECT photo_url FROM user_photos
+                WHERE user_id = pv.viewer_id AND is_approved = true AND is_primary = true
+                LIMIT 1) as photo_url
+             FROM profile_views pv
+             JOIN user_profiles p ON p.user_id = pv.viewer_id
+             JOIN users u ON u.id = pv.viewer_id
+             WHERE pv.viewed_id = $1
+               AND u.is_active = true AND u.is_suspended = false
+             ORDER BY pv.viewer_id, pv.viewed_at DESC
+             LIMIT 30`,
+            [userId]
+          )
+        : query(
+            `SELECT COUNT(DISTINCT viewer_id) AS total FROM profile_views WHERE viewed_id = $1`,
+            [userId]
+          ),
+
+      // ── Shortlists ────────────────────────────────────────
+      query(
+        `SELECT p.user_id, p.first_name, p.location_city, p.denomination,
+                p.date_of_birth, p.profession, p.trust_badge,
+                s.created_at as shortlisted_at,
+                (SELECT photo_url FROM user_photos
+                 WHERE user_id = p.user_id AND is_approved = true AND is_primary = true
+                 LIMIT 1) as photo_url
+         FROM shortlists s
+         JOIN user_profiles p ON p.user_id = s.shortlisted_user_id
+         JOIN users u ON u.id = s.shortlisted_user_id
+         WHERE s.user_id = $1
+           AND u.is_active = true AND u.is_suspended = false
+         ORDER BY s.created_at DESC
+         LIMIT 30`,
+        [userId]
+      ),
+
+      // ── Incoming Contact Requests ─────────────────────────
+      query(
+        `SELECT cr.id, cr.requester_id AS user_id, cr.status, cr.requested_at, cr.responded_at,
+                p.first_name, p.profession, p.denomination,
+                (SELECT photo_url FROM user_photos
+                 WHERE user_id = cr.requester_id AND is_approved = true AND is_primary = true
+                 LIMIT 1) as primary_photo
+         FROM contact_requests cr
+         JOIN user_profiles p ON p.user_id = cr.requester_id
+         WHERE cr.target_user_id = $1
+         ORDER BY cr.requested_at DESC`,
+        [userId]
+      ),
+    ]);
+
+    // ── Notifications ─────────────────────────────────────
+    const notifications = notifResult.status === 'fulfilled'
+      ? notifResult.value.rows
+      : [];
+    const unreadCount = notifications.filter(n => !n.is_read).length;
+
+    // ── Views ────────────────────────────────────────────
+    let viewers = [];
+    let totalViews = 0;
+    if (viewsResult.status === 'fulfilled') {
+      if (isPremium) {
+        viewers = viewsResult.value.rows.map(v => {
+          const dob = v.date_of_birth ? new Date(v.date_of_birth) : null;
+          const age = dob ? new Date().getFullYear() - dob.getFullYear() : null;
+          return { ...v, age, date_of_birth: undefined };
+        });
+        totalViews = viewers.length;
+      } else {
+        totalViews = parseInt(viewsResult.value.rows[0]?.total ?? 0);
+      }
+    }
+
+    // ── Shortlists ───────────────────────────────────────
+    const shortlists = shortlistResult.status === 'fulfilled'
+      ? shortlistResult.value.rows.map(v => {
+          const dob = v.date_of_birth ? new Date(v.date_of_birth) : null;
+          const age = dob ? new Date().getFullYear() - dob.getFullYear() : null;
+          return { ...v, age, date_of_birth: undefined };
+        })
+      : [];
+
+    // ── Contact Requests ─────────────────────────────────
+    const contactRequests = contactResult.status === 'fulfilled'
+      ? contactResult.value.rows
+      : [];
+
+    res.json({
+      success: true,
+      data: {
+        notifications,
+        unread_count:       unreadCount,
+        viewers,
+        total_views:        totalViews,
+        is_premium_views:   isPremium,
+        shortlists,
+        contact_requests:   contactRequests,
+        // Report which sections had errors so the client can show partial-data notices
+        errors: {
+          notifications:    notifResult.status   === 'rejected' ? notifResult.reason?.message   : null,
+          views:            viewsResult.status    === 'rejected' ? viewsResult.reason?.message    : null,
+          shortlists:       shortlistResult.status === 'rejected' ? shortlistResult.reason?.message : null,
+          contact_requests: contactResult.status  === 'rejected' ? contactResult.reason?.message  : null,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getSummary, getViews, getShortlists, toggleShortlist, checkShortlist, getBootstrap };

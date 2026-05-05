@@ -8,6 +8,8 @@ const {
   buySpotlight,
   requestContact,
   respondContact,
+  getContactStatus,
+  getIncomingContactRequests,
 } = require('../controllers/premium.controller');
 
 router.use(authMiddleware);
@@ -33,5 +35,16 @@ router.post(
   validate,
   respondContact
 );
+
+// ─── GET Contact Status with a Specific User ─────────────────
+router.get(
+  '/contact-status/:targetUserId',
+  [param('targetUserId').isUUID().withMessage('Invalid user ID')],
+  validate,
+  getContactStatus
+);
+
+// ─── GET Incoming Contact Requests ───────────────────────────
+router.get('/contact-requests/incoming', getIncomingContactRequests);
 
 module.exports = router;

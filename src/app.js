@@ -20,8 +20,9 @@ const adminRoutes = require('./routes/admin.routes');
 const premiumRoutes = require('./routes/premium.routes');
 const trustRoutes = require('./routes/trust.routes');
 const growthRoutes = require('./routes/growth.routes');
-const activityRoutes = require('./routes/activity.routes');
-const shareRoutes    = require('./routes/share.routes');
+const activityRoutes   = require('./routes/activity.routes');
+const shareRoutes      = require('./routes/share.routes');
+const bootstrapRoutes  = require('./routes/bootstrap.routes');
 const { assetLinks, appleAppSiteAssociation } = require('./controllers/share.controller');
 
 const app = express();
@@ -119,8 +120,9 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/premium', premiumRoutes);
 app.use('/api/v1/trust', trustRoutes);
 app.use('/api/v1/growth', growthRoutes);
-app.use('/api/v1/activity', activityRoutes);
-app.use('/api/v1/share',   shareRoutes);
+app.use('/api/v1/activity',   activityRoutes);
+app.use('/api/v1/share',     shareRoutes);
+app.use('/api/v1/bootstrap', bootstrapRoutes);
 
 // ─── 404 & Error Handlers ────────────────────────────────────
 app.use(notFound);

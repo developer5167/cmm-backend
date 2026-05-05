@@ -27,4 +27,8 @@ router.get('/users/:userId/views',          adminController.getUserViewStats);
 router.get('/users/:userId/shortlisted-by', adminController.getUserShortlistStats);
 router.get('/users/:userId/notifications',  adminController.getUserNotifStats);
 
+// ─── ID Verification Review ───────────────────────────────────
+router.get('/verifications/pending',        adminController.getPendingVerifications);
+router.put('/verifications/:userId',        adminController.reviewVerification);
+
 module.exports = router;

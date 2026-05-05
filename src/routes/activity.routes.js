@@ -9,9 +9,13 @@ const {
   getShortlists,
   toggleShortlist,
   checkShortlist,
+  getBootstrap,
 } = require('../controllers/activity.controller');
 
 router.use(authMiddleware);
+
+// Bootstrap — single call for the entire Activity tab
+router.get('/bootstrap', getBootstrap);
 
 // Summary (badge counts)
 router.get('/summary', getSummary);
